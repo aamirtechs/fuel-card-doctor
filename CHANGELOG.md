@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+* Every finding now carries a short suggested action: the
+  text output prints it on a `next:` line under the finding,
+  and the JSON `findings` gain an `action` field, so a fleet
+  manager who is not a fraud analyst knows the next step for
+  each flagged transaction.
+
 ## 1.0.0 - 2026-11-12
 
 Initial release.

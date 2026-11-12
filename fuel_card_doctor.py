@@ -22,10 +22,13 @@ the file, flags every problem with a rule name and a
 severity, and never touches the card provider.
 
 Each problem is a finding with a transaction ID, a rule name,
-a severity (error or warning), and a message. Errors are the
-ones that are a live fraud signal or break the audit;
-warnings are transactions worth following up. --check exits 1
-when any error is found, and --strict also fails on warnings.
+a severity (error or warning), a message, and a short
+suggested action, so a fleet manager who is not a fraud
+analyst knows the next step for each flagged transaction.
+Errors are the ones that are a live fraud signal or break
+the audit; warnings are transactions worth following up.
+--check exits 1 when any error is found, and --strict also
+fails on warnings.
 
 Zero dependencies, Python 3.10 or newer, standard library only.
 
@@ -101,6 +104,75 @@ PRICE_TOLERANCE = Decimal("0.10")
 HIGH_PRICE_MARGIN = Decimal("1.20")
 HIGH_PRICE_MIN_GROUP = 3
 
+# Suggested next step per rule, printed with each finding in the
+# text output and carried in the JSON "action" field, so a fleet
+# manager who is not a fraud analyst knows what to do next.
+RULE_ACTIONS = {
+    "over-tank-gallons": (
+        "compare the receipt with the tank size, then dispute "
+        "any gallons the tank cannot hold"),
+    "duplicate-fill": (
+        "check whether the two fills are one split transaction, "
+        "and dispute the second charge if they are not"),
+    "odometer-regression": (
+        "ask the driver for the current odometer reading and "
+        "fix the export, since the mileage is wrong"),
+    "non-fuel-purchase": (
+        "ask the driver what was bought, then recover the "
+        "amount from the driver or dispute the charge"),
+    "price-mismatch": (
+        "ask the driver for the receipt, then dispute any "
+        "overcharge with the card provider"),
+    "shared-card": "call the card provider to dispute the charge",
+    "duplicate-transaction": (
+        "check the card statement so the duplicate is not "
+        "paid twice"),
+    "invalid-number": (
+        "fix the bad value in the export and rerun the audit"),
+    "negative-value": (
+        "check whether the row is a credit, and dispute the "
+        "charge with the card provider if it is not"),
+    "invalid-date": (
+        "fix the date in the export and rerun the audit"),
+    "malformed-row": (
+        "re-export the file from the card provider, since "
+        "this row is broken"),
+    "implausible-mpg": (
+        "check the receipts for both fills, since the gallons "
+        "or the odometer look wrong"),
+    "zero-miles-fill": (
+        "ask the driver where the truck was between the two "
+        "fills"),
+    "off-hours-fill": (
+        "ask the driver who made the fill and why it was "
+        "outside operating hours"),
+    "high-price": (
+        "check the receipt for a wrong price, then plan the "
+        "route around a cheaper station"),
+    "missing-odometer": (
+        "ask the driver for the odometer reading so the MPG "
+        "checks can run"),
+    "missing-card": (
+        "add the card number to the export so the purchase "
+        "can be tied to a card"),
+    "missing-unit": (
+        "add the unit number to the export so the purchase "
+        "can be tied to a truck"),
+    "missing-product": (
+        "check the receipt so the purchase can be classified "
+        "as fuel or non-fuel"),
+    "unknown-product": (
+        "check the receipt and add the product to the "
+        "built-in fuel or non-fuel list"),
+    "future-date": (
+        "check the export date, since a future transaction "
+        "usually means a wrong date"),
+}
+
+DEFAULT_ACTION = (
+    "review the transaction against the receipt, then "
+    "contact the card provider if the charge looks wrong")
+
 
 class Finding:
     """One audit finding for one transaction or for the file."""
@@ -110,11 +182,13 @@ class Finding:
         self.rule = rule
         self.severity = severity
         self.message = message
+        self.action = RULE_ACTIONS.get(rule, DEFAULT_ACTION)
 
     def as_dict(self):
         """Return the finding as a plain dict."""
         return {"transaction_id": self.txn_id, "rule": self.rule,
-                "severity": self.severity, "message": self.message}
+                "severity": self.severity, "message": self.message,
+                "action": self.action}
 
     def __str__(self):
         return "%s [%s] %s: %s" % (self.severity.upper(), self.rule,
@@ -645,6 +719,7 @@ def format_text(report):
                         finding["rule"],
                         finding["transaction_id"],
                         finding["message"]))
+        lines.append("  next: %s" % finding["action"])
     if report["units"]:
         lines.append("")
         lines.append("Per unit:")

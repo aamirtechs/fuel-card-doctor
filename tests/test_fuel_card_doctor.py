@@ -683,5 +683,96 @@ class TestCliExitCodes(unittest.TestCase):
         self.assertIn("findings: 19", result.stdout)
 
 
+class TestActions(unittest.TestCase):
+    ALL_RULES = (
+        "duplicate-fill", "duplicate-transaction", "future-date",
+        "high-price", "implausible-mpg", "invalid-date",
+        "invalid-number", "malformed-row", "missing-card",
+        "missing-odometer", "missing-product", "missing-unit",
+        "negative-value", "non-fuel-purchase", "off-hours-fill",
+        "odometer-regression", "over-tank-gallons",
+        "price-mismatch", "shared-card", "unknown-product",
+        "zero-miles-fill",
+    )
+
+    def test_action_mapping_covers_every_rule(self):
+        self.assertEqual(sorted(fcd.RULE_ACTIONS),
+                         sorted(self.ALL_RULES))
+        for rule, action in fcd.RULE_ACTIONS.items():
+            self.assertTrue(action.strip(), rule)
+
+    def test_sample_finding_carries_action(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))),
+            "examples", "transactions.csv")
+        report = fcd.analyze_file(path, as_of=AS_OF)
+        self.assertEqual(len(report["findings"]), 19)
+        for finding in report["findings"]:
+            self.assertIn(finding["rule"], fcd.RULE_ACTIONS)
+            self.assertTrue(finding["action"].strip(),
+                            finding["rule"])
+
+    def test_shared_card_action(self):
+        text = HEADER \
+            + txn_row(txn_id="T-1", card="1111", unit="U-1") \
+            + txn_row(txn_id="T-2", date="2026-11-01",
+                      time="14:00", card="1111", unit="U-2",
+                      odometer="50000", gallons="60.0",
+                      amount="246.00", price="4.10")
+        report = analyze_text(text)
+        self.assertEqual(
+            finding_for(report, "shared-card")["action"],
+            "call the card provider to dispute the charge")
+
+    def test_price_mismatch_action(self):
+        report = analyze_text(
+            HEADER + txn_row(gallons="45.0", amount="200.00",
+                             price="4.10"))
+        action = finding_for(report, "price-mismatch")["action"]
+        self.assertTrue(
+            action.startswith("ask the driver for the receipt"),
+            action)
+
+    def test_missing_field_actions(self):
+        report = analyze_text(
+            HEADER + txn_row(card="", unit="", product=""))
+        for rule in ("missing-card", "missing-unit",
+                     "missing-product"):
+            self.assertIn(rule, rules(report))
+            self.assertTrue(
+                finding_for(report, rule)["action"].strip(), rule)
+
+    def test_unknown_rule_gets_default_action(self):
+        finding = fcd.Finding("T-1", "brand-new-rule", "warning",
+                              "something new")
+        self.assertEqual(finding.action, fcd.DEFAULT_ACTION)
+
+    def test_text_output_shows_action(self):
+        report = analyze_text(
+            HEADER + txn_row(gallons="165.0", amount="660.00"))
+        output = fcd.format_text(report)
+        self.assertIn(
+            "next: compare the receipt with the tank size",
+            output)
+
+    def test_text_output_action_for_every_sample_finding(self):
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))),
+            "examples", "transactions.csv")
+        report = fcd.analyze_file(path, as_of=AS_OF)
+        output = fcd.format_text(report)
+        self.assertEqual(output.count("  next: "), 19)
+
+    def test_json_output_carries_action(self):
+        report = analyze_text(
+            HEADER + txn_row(gallons="165.0", amount="660.00"))
+        parsed = json.loads(fcd.format_json(report))
+        self.assertEqual(
+            parsed["findings"][0]["action"],
+            fcd.RULE_ACTIONS["over-tank-gallons"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -119,6 +119,40 @@ Warnings, transactions worth following up:
   fuel product nor a known non-fuel product.
 * `future-date`: a transaction date in the future.
 
+## What to do about each finding
+
+Each finding carries a short suggested action for a fleet
+manager who is not a fraud analyst. The text output prints
+it on a `next:` line under the finding, and the JSON
+`findings` carry the same text in an `action` field:
+
+| Rule | Suggested action |
+| --- | --- |
+| `duplicate-fill` | check whether the two fills are one split transaction, and dispute the second charge if they are not |
+| `duplicate-transaction` | check the card statement so the duplicate is not paid twice |
+| `future-date` | check the export date, since a future transaction usually means a wrong date |
+| `high-price` | check the receipt for a wrong price, then plan the route around a cheaper station |
+| `implausible-mpg` | check the receipts for both fills, since the gallons or the odometer look wrong |
+| `invalid-date` | fix the date in the export and rerun the audit |
+| `invalid-number` | fix the bad value in the export and rerun the audit |
+| `malformed-row` | re-export the file from the card provider, since this row is broken |
+| `missing-card` | add the card number to the export so the purchase can be tied to a card |
+| `missing-odometer` | ask the driver for the odometer reading so the MPG checks can run |
+| `missing-product` | check the receipt so the purchase can be classified as fuel or non-fuel |
+| `missing-unit` | add the unit number to the export so the purchase can be tied to a truck |
+| `negative-value` | check whether the row is a credit, and dispute the charge with the card provider if it is not |
+| `non-fuel-purchase` | ask the driver what was bought, then recover the amount from the driver or dispute the charge |
+| `odometer-regression` | ask the driver for the current odometer reading and fix the export, since the mileage is wrong |
+| `off-hours-fill` | ask the driver who made the fill and why it was outside operating hours |
+| `over-tank-gallons` | compare the receipt with the tank size, then dispute any gallons the tank cannot hold |
+| `price-mismatch` | ask the driver for the receipt, then dispute any overcharge with the card provider |
+| `shared-card` | call the card provider to dispute the charge |
+| `unknown-product` | check the receipt and add the product to the built-in fuel or non-fuel list |
+| `zero-miles-fill` | ask the driver where the truck was between the two fills |
+
+A rule without a built-in suggestion falls back to a generic
+action: review the transaction against the receipt, then contact the card provider if the charge looks wrong.
+
 ## Usage
 
 ```bash
@@ -129,24 +163,43 @@ Captured output:
 
 ```
 WARNING [off-hours-fill] T-1003: fill at 02:30 is outside operating hours 05:00 to 23:00
+  next: ask the driver who made the fill and why it was outside operating hours
 WARNING [off-hours-fill] T-1004: fill at 02:45 is outside operating hours 05:00 to 23:00
+  next: ask the driver who made the fill and why it was outside operating hours
 ERROR [over-tank-gallons] T-1005: gallons 165.0 is above the tank capacity of 150
+  next: compare the receipt with the tank size, then dispute any gallons the tank cannot hold
 ERROR [non-fuel-purchase] T-1007: product 'merchandise' is not fuel, but it was bought on a fuel card
+  next: ask the driver what was bought, then recover the amount from the driver or dispute the charge
 ERROR [price-mismatch] T-1009: amount 200.00 does not match gallons 45.0 times price 4.10 (expected 184.500)
+  next: ask the driver for the receipt, then dispute any overcharge with the card provider
 WARNING [missing-odometer] T-1012: no odometer reading, so MPG and odometer checks cannot run for this fill
+  next: ask the driver for the odometer reading so the MPG checks can run
 ERROR [invalid-number] T-1013: odometer 'abc' is not a valid whole number
+  next: fix the bad value in the export and rerun the audit
 ERROR [duplicate-transaction] T-1001: transaction ID already appears in this export, so this duplicate row was skipped
+  next: check the card statement so the duplicate is not paid twice
 ERROR [malformed-row] row 16: row has 2 fields but the header has 13, so the row was skipped
+  next: re-export the file from the card provider, since this row is broken
 WARNING [future-date] T-1015: transaction date 2026-12-01 is in the future
+  next: check the export date, since a future transaction usually means a wrong date
 ERROR [invalid-date] T-1016: date 'not-a-date' is not a recognised date
+  next: fix the date in the export and rerun the audit
 ERROR [negative-value] T-1017: gallons -10.0 is negative
+  next: check whether the row is a credit, and dispute the charge with the card provider if it is not
 ERROR [negative-value] T-1017: amount -41.00 is negative
+  next: check whether the row is a credit, and dispute the charge with the card provider if it is not
 WARNING [high-price] T-1011: price 5.25 in TX is above the state median 4.10 by more than 20%
+  next: check the receipt for a wrong price, then plan the route around a cheaper station
 WARNING [zero-miles-fill] T-1004: odometer did not move since the previous fill for unit U-101, so the truck drove no miles between fills
+  next: ask the driver where the truck was between the two fills
 ERROR [duplicate-fill] T-1004: fill 15 minutes after the previous fill for unit U-101, below the minimum gap of 30 minutes
+  next: check whether the two fills are one split transaction, and dispute the second charge if they are not
 ERROR [odometer-regression] T-1006: odometer 97900 is below the previous reading 98400 for unit U-102
+  next: ask the driver for the current odometer reading and fix the export, since the mileage is wrong
 WARNING [implausible-mpg] T-1008: MPG 20.00 for unit U-103 is outside the plausible range 4.0 to 12.0
+  next: check the receipts for both fills, since the gallons or the odometer look wrong
 ERROR [shared-card] T-1011: card 1234 was already used on unit U-101 on 2026-11-03, but this fill is on unit U-105
+  next: call the card provider to dispute the charge
 
 Per unit:
 U-101: 4 fills, 283.00 gallons, $1146.40, $4.05/gal, 6.08 mpg
@@ -199,7 +252,7 @@ fill and a missing odometer, so it passes `--check` (exit 0)
 and fails `--check --strict` (exit 1).
 
 `--json` emits the summary, per-unit table, and findings as
-JSON:
+JSON, with an `action` field on every finding:
 
 ```bash
 python3 fuel_card_doctor.py examples/transactions.csv --as-of 2026-11-11 --json
@@ -213,19 +266,22 @@ Captured output (first findings and summary):
     "transaction_id": "T-1003",
     "rule": "off-hours-fill",
     "severity": "warning",
-    "message": "fill at 02:30 is outside operating hours 05:00 to 23:00"
+    "message": "fill at 02:30 is outside operating hours 05:00 to 23:00",
+    "action": "ask the driver who made the fill and why it was outside operating hours"
   },
   {
     "transaction_id": "T-1004",
     "rule": "off-hours-fill",
     "severity": "warning",
-    "message": "fill at 02:45 is outside operating hours 05:00 to 23:00"
+    "message": "fill at 02:45 is outside operating hours 05:00 to 23:00",
+    "action": "ask the driver who made the fill and why it was outside operating hours"
   },
   {
     "transaction_id": "T-1005",
     "rule": "over-tank-gallons",
     "severity": "error",
-    "message": "gallons 165.0 is above the tank capacity of 150"
+    "message": "gallons 165.0 is above the tank capacity of 150",
+    "action": "compare the receipt with the tank size, then dispute any gallons the tank cannot hold"
   }
 ]
 ```
@@ -303,7 +359,7 @@ Captured output (first findings and summary):
 python3 -m unittest discover -s tests -v
 ```
 
-74 tests, all passing: date, time, and decimal parsing,
+83 tests, all passing: date, time, and decimal parsing,
 header aliases, datetime columns, BOM headers, every rule
 including the tank capacity, min-gap, MPG, and operating
 hours boundaries and the --tank-capacity, --min-gap,
@@ -312,8 +368,9 @@ transaction IDs, shared cards on the same day versus
 different days, high-price medians and the 3-transaction
 minimum, price-mismatch tolerance, malformed rows, invalid,
 missing, and future dates, sample counts, per-unit MPG,
-JSON output shape, and `--check` and `--strict` exit codes.
-The same 74 tests pass under pytest.
+JSON output shape, the per-rule suggested actions in the
+text and JSON output, and `--check` and `--strict` exit codes.
+The same 83 tests pass under pytest.
 
 ## License
 
